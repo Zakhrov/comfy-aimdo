@@ -46,6 +46,23 @@ typedef CUresult (CUDAAPI *PFN_cuMemcpyHtoDAsync)(CUdeviceptr dst, const void *s
                                                   size_t bytes, CUstream hStream);
 typedef CUresult (CUDAAPI *PFN_cuMemcpyDtoHAsync)(void *dst, CUdeviceptr src,
                                                   size_t bytes, CUstream hStream);
+typedef CUresult (CUDAAPI *PFN_cuMemAllocManaged)(CUdeviceptr *dptr, size_t bytesize,
+                                                  unsigned int flags);
+typedef CUresult (CUDAAPI *PFN_cuMemAdvise)(CUdeviceptr ptr, size_t count, int advice,
+                                            CUdevice device);
+typedef CUresult (CUDAAPI *PFN_cuMemPrefetchAsync)(CUdeviceptr ptr, size_t count,
+                                                   CUdevice dstDevice, CUstream hStream);
+typedef CUresult (CUDAAPI *PFN_cuStreamCreate)(CUstream *phStream, unsigned int flags);
+typedef CUresult (CUDAAPI *PFN_cuStreamSynchronize)(CUstream hStream);
+typedef CUresult (CUDAAPI *PFN_cuStreamDestroy)(CUstream hStream);
+typedef CUresult (CUDAAPI *PFN_cuStreamWaitEvent)(CUstream hStream, CUevent hEvent,
+                                                  unsigned int flags);
+/* HIP keeps the runtime memcpy kind on these; the CUDA driver API has no equivalent. */
+typedef CUresult (CUDAAPI *PFN_hipMemcpyAsync)(void *dst, const void *src, size_t bytes,
+                                               int kind, CUstream hStream);
+typedef CUresult (CUDAAPI *PFN_hipSetDevice)(int device);
+typedef CUresult (CUDAAPI *PFN_hipExtMallocWithFlags)(CUdeviceptr *dptr, size_t bytesize,
+                                                      unsigned int flags);
 typedef CUresult (CUDAAPI *PFN_cuEventCreate)(CUevent *phEvent, unsigned int flags);
 typedef CUresult (CUDAAPI *PFN_cuEventDestroy)(CUevent hEvent);
 typedef CUresult (CUDAAPI *PFN_cuEventRecord)(CUevent hEvent, CUstream hStream);
@@ -84,6 +101,17 @@ typedef struct AimdoCudaDispatch {
     PFN_cuMemRelease p_cuMemRelease;
     PFN_cuMemcpyHtoDAsync p_cuMemcpyHtoDAsync;
     PFN_cuMemcpyDtoHAsync p_cuMemcpyDtoHAsync;
+    PFN_cuMemAllocManaged p_cuMemAllocManaged;
+    PFN_cuMemAdvise p_cuMemAdvise;
+    PFN_cuMemPrefetchAsync p_cuMemPrefetchAsync;
+    PFN_cuStreamCreate p_cuStreamCreate;
+    PFN_cuStreamSynchronize p_cuStreamSynchronize;
+    PFN_cuStreamDestroy p_cuStreamDestroy;
+    PFN_cuStreamWaitEvent p_cuStreamWaitEvent;
+    PFN_hipMemcpyAsync p_hipMemcpyAsync;
+    PFN_hipMemcpyAsync p_hipMemcpyWithStream;
+    PFN_hipSetDevice p_hipSetDevice;
+    PFN_hipExtMallocWithFlags p_hipExtMallocWithFlags;
     PFN_cuEventCreate p_cuEventCreate;
     PFN_cuEventDestroy p_cuEventDestroy;
     PFN_cuEventRecord p_cuEventRecord;

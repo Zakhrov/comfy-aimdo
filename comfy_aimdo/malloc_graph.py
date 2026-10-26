@@ -75,6 +75,10 @@ class MallocGraph:
             self._handle = None
 
 
+def supported(device_index):
+    return control.lib.malloc_graph_supported(control.get_devctx(device_index))
+
+
 def record(stream, assert_graph_breaks=False):
     handle = control.lib.malloc_graph_create(
         control.get_devctx(stream.device.index), ctypes.c_void_p(stream.cuda_stream),

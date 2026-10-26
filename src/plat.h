@@ -91,6 +91,13 @@ void *aimdo_find_loaded_module(const char *const *libraries, size_t library_coun
 #define cuMemRelease                g_cuda.p_cuMemRelease
 #define cuMemcpyHtoDAsync           g_cuda.p_cuMemcpyHtoDAsync
 #define cuMemcpyDtoHAsync           g_cuda.p_cuMemcpyDtoHAsync
+#define cuMemAllocManaged           g_cuda.p_cuMemAllocManaged
+#define cuMemAdvise                 g_cuda.p_cuMemAdvise
+#define cuMemPrefetchAsync          g_cuda.p_cuMemPrefetchAsync
+#define cuStreamCreate              g_cuda.p_cuStreamCreate
+#define cuStreamSynchronize         g_cuda.p_cuStreamSynchronize
+#define cuStreamDestroy             g_cuda.p_cuStreamDestroy
+#define cuStreamWaitEvent           g_cuda.p_cuStreamWaitEvent
 #define cuEventCreate               g_cuda.p_cuEventCreate
 #define cuEventDestroy              g_cuda.p_cuEventDestroy
 #define cuEventRecord               g_cuda.p_cuEventRecord
@@ -182,10 +189,52 @@ static inline int check_cu_impl(CUresult res, const char *label, int oom_level, 
 #define CHECK_CU_OOM_ERROR(x) check_cu_impl((x), #x, AIMDO_LOG_ERROR, DEBUG)
 #define CHECK_CU_ERROR(x) check_cu_impl((x), #x, VVERBOSE, AIMDO_LOG_ERROR)
 
+/* svm.c: HIP SVM stands in for VMM on KFD drivers that cannot map compute VMs (< 1.15). */
+#if defined(__HIP_PLATFORM_AMD__) && !defined(_WIN32) && !defined(_WIN64)
+bool svm_init(CUdevice dev);
+void svm_cleanup(void);
+CUresult svm_reserve(CUdeviceptr *va, size_t size);
+void svm_free(CUdeviceptr va);
+CUresult svm_map(CUdeviceptr va, size_t size, int device);
+void svm_unmap(CUdeviceptr va, size_t size);
+bool svm_mem_get_info(size_t *free_bytes, size_t *total_bytes);
+CUresult svm_memcpy(void *dst, const void *src, size_t size, int kind, CUstream stream,
+                    PFN_hipMemcpyAsync copy);
+#else
+static inline bool svm_init(CUdevice dev) { return true; }
+static inline void svm_cleanup(void) {}
+static inline CUresult svm_reserve(CUdeviceptr *va, size_t size) { return CUDA_ERROR_UNKNOWN; }
+static inline void svm_free(CUdeviceptr va) {}
+static inline CUresult svm_map(CUdeviceptr va, size_t size, int device) { return CUDA_ERROR_UNKNOWN; }
+static inline void svm_unmap(CUdeviceptr va, size_t size) {}
+static inline bool svm_mem_get_info(size_t *free_bytes, size_t *total_bytes) { return false; }
+#endif
+
+static inline CUresult va_reserve(CUdeviceptr *va, size_t size, size_t alignment) {
+    return svm_backed ? svm_reserve(va, size) : cuMemAddressReserve(va, size, alignment, 0, 0);
+}
+
+static inline CUresult va_free(CUdeviceptr va, size_t size) {
+    if (svm_backed) {
+        svm_free(va);
+        return CUDA_SUCCESS;
+    }
+    return cuMemAddressFree(va, size);
+}
+
 static inline CUresult three_stooges(CUdeviceptr vaddr, size_t size, int device,
                                      CUmemGenericAllocationHandle *handle) {
     CUmemGenericAllocationHandle h = 0;
     CUresult err;
+
+    if (svm_backed) {
+        if ((err = svm_map(vaddr, size, device)) == CUDA_SUCCESS) {
+            total_vram_usage += size;
+            /* SVM pages have no handle; callers only need it non-zero while resident. */
+            *handle = vaddr;
+        }
+        return err;
+    }
 
     CUmemAllocationProp prop = {
         .type = CU_MEM_ALLOCATION_TYPE_PINNED,
@@ -220,6 +269,17 @@ fail_mmap:
     CHECK_CU_ERROR(cuMemRelease(h));
 fail:
     return err;
+}
+
+static inline void unmap_release(CUdeviceptr vaddr, size_t size,
+                                 CUmemGenericAllocationHandle handle) {
+    if (svm_backed) {
+        svm_unmap(vaddr, size);
+        return;
+    }
+    CHECK_CU(cuMemUnmap(vaddr, size));
+    unmap_workaround(vaddr, size);
+    CHECK_CU(cuMemRelease(handle));
 }
 
 /* vrambuf.c */

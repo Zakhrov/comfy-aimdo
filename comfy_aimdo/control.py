@@ -124,6 +124,9 @@ def init(implementation: str | None = None, simple_vram_headroom: int | None = N
     lib.get_devctx.argtypes = [ctypes.c_int]
     lib.get_devctx.restype = ctypes.c_void_p
 
+    lib.malloc_graph_supported.argtypes = [ctypes.c_void_p]
+    lib.malloc_graph_supported.restype = ctypes.c_bool
+
     lib.malloc_graph_create.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool]
     lib.malloc_graph_create.restype = ctypes.c_void_p
 

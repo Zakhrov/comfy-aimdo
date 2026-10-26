@@ -168,7 +168,8 @@ bool cuda_budget_deficit(const char **prevailing_deficit_method) {
 #if (defined(_WIN32) || defined(_WIN64)) && defined(AIMDO_CUDA)
     used_nvml = nvml_device && aimdo_nvml_memory_info(nvml_device, &free_vram, &total_vram);
 #endif
-    if (!used_nvml && !CHECK_CU(cuMemGetInfo(&free_vram, &total_vram))) {
+    if (!used_nvml && !(svm_backed ? svm_mem_get_info(&free_vram, &total_vram)
+                                   : CHECK_CU(cuMemGetInfo(&free_vram, &total_vram)))) {
         return false;
     }
     deficit_sync = (ssize_t)VRAM_HEADROOM - (ssize_t)free_vram;
@@ -215,6 +216,7 @@ void cleanup(void) {
         hostbuf_file_reader_cleanup();
         aimdo_wddm_cleanup();
         va_pool_cleanup();
+        svm_cleanup();
         allocations_cleanup();
 
         free(highest_priority_p); /* FIXME: move the model_vbar. */
@@ -250,7 +252,8 @@ bool init(const int *cuda_device_ids, const uint64_t *extra_vram_headrooms, size
         if (!allocations_init() ||
             !va_pool_init() ||
             !CHECK_CU(cuDeviceGet(&dev, cuda_device_ids[i])) ||
-            !CHECK_CU(cuDeviceTotalMem(&vram_capacity, dev))) {
+            !CHECK_CU(cuDeviceTotalMem(&vram_capacity, dev)) ||
+            !svm_init(dev)) {
             goto fail;
         }
 

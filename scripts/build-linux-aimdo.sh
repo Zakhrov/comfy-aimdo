@@ -103,7 +103,7 @@ gcc -shared -o "$CUDA_OUTPUT_PATH" -fPIC -O2 -g -pthread \
 gcc -shared -o "$ROCM_OUTPUT_PATH" -fPIC -O2 -g -pthread \
     -D__HIP_PLATFORM_AMD__ \
     ${AIMDO_EXTRA_CFLAGS:-} \
-    "$ROOT_DIR"/src/*.c "$ROOT_DIR"/src-hip/dispatch.c "$ROOT_DIR"/src-posix/*.c \
+    "$ROOT_DIR"/src/*.c "$ROOT_DIR"/src-hip/dispatch.c "$ROOT_DIR"/src-hip/svm.c "$ROOT_DIR"/src-posix/*.c \
     -I"$ROOT_DIR/src" -I"$FUNCHOOK_SRC/include" \
     $FUNCHOOK_LIBS \
     -ldl

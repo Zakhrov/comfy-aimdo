@@ -45,6 +45,35 @@ static CUresult CUDAAPI aimdo_cuMemFreeAsync_ptsz(CUdeviceptr dptr, CUstream hSt
     return aimdo_cuda_free_async(dptr, hStream, true_cuMemFreeAsync_ptsz);
 }
 
+#if defined(__HIP_PLATFORM_AMD__) && !defined(_WIN32) && !defined(_WIN64)
+static CUresult (CUDAAPI *true_hipMemcpyAsync)(void *, const void *, size_t, int, CUstream);
+static CUresult (CUDAAPI *true_hipMemcpyWithStream)(void *, const void *, size_t, int, CUstream);
+static CUresult (CUDAAPI *true_cuMemcpyHtoDAsync)(CUdeviceptr, const void *, size_t, CUstream);
+static CUresult (CUDAAPI *true_cuMemcpyDtoHAsync)(void *, CUdeviceptr, size_t, CUstream);
+
+static CUresult CUDAAPI aimdo_hipMemcpyAsync(void *dst, const void *src, size_t bytes, int kind,
+                                             CUstream hStream) {
+    return svm_memcpy(dst, src, bytes, kind, hStream, true_hipMemcpyAsync);
+}
+
+static CUresult CUDAAPI aimdo_hipMemcpyWithStream(void *dst, const void *src, size_t bytes,
+                                                  int kind, CUstream hStream) {
+    return svm_memcpy(dst, src, bytes, kind, hStream, true_hipMemcpyWithStream);
+}
+
+static CUresult CUDAAPI aimdo_cuMemcpyHtoDAsync(CUdeviceptr dst, const void *src, size_t bytes,
+                                                CUstream hStream) {
+    return svm_memcpy((void *)(uintptr_t)dst, src, bytes, HIP_MEMCPY_HOST_TO_DEVICE, hStream,
+                      true_hipMemcpyAsync);
+}
+
+static CUresult CUDAAPI aimdo_cuMemcpyDtoHAsync(void *dst, CUdeviceptr src, size_t bytes,
+                                                CUstream hStream) {
+    return svm_memcpy(dst, (const void *)(uintptr_t)src, bytes, HIP_MEMCPY_DEVICE_TO_HOST, hStream,
+                      true_hipMemcpyAsync);
+}
+#endif
+
 static const HookEntry hooks[] = {
     { (void **)&true_cuMemAlloc_v2,        (void **)&g_cuda.p_cuMemAlloc_v2,        aimdo_cuMemAlloc_v2,        "cuMemAlloc_v2" },
     { (void **)&true_cuMemFree_v2,         (void **)&g_cuda.p_cuMemFree_v2,         aimdo_cuMemFree_v2,         "cuMemFree_v2" },
@@ -52,4 +81,10 @@ static const HookEntry hooks[] = {
     { (void **)&true_cuMemAllocAsync_ptsz, (void **)&g_cuda.p_cuMemAllocAsync_ptsz, aimdo_cuMemAllocAsync_ptsz, "cuMemAllocAsync_ptsz" },
     { (void **)&true_cuMemFreeAsync,       (void **)&g_cuda.p_cuMemFreeAsync,       aimdo_cuMemFreeAsync,       "cuMemFreeAsync" },
     { (void **)&true_cuMemFreeAsync_ptsz,  (void **)&g_cuda.p_cuMemFreeAsync_ptsz,  aimdo_cuMemFreeAsync_ptsz,  "cuMemFreeAsync_ptsz" },
+#if defined(__HIP_PLATFORM_AMD__) && !defined(_WIN32) && !defined(_WIN64)
+    { (void **)&true_hipMemcpyAsync,       (void **)&g_cuda.p_hipMemcpyAsync,       aimdo_hipMemcpyAsync,       "hipMemcpyAsync" },
+    { (void **)&true_hipMemcpyWithStream,  (void **)&g_cuda.p_hipMemcpyWithStream,  aimdo_hipMemcpyWithStream,  "hipMemcpyWithStream" },
+    { (void **)&true_cuMemcpyHtoDAsync,    (void **)&g_cuda.p_cuMemcpyHtoDAsync,    aimdo_cuMemcpyHtoDAsync,    "cuMemcpyHtoDAsync" },
+    { (void **)&true_cuMemcpyDtoHAsync,    (void **)&g_cuda.p_cuMemcpyDtoHAsync,    aimdo_cuMemcpyDtoHAsync,    "cuMemcpyDtoHAsync" },
+#endif
 };

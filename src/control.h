@@ -51,6 +51,15 @@ typedef struct AimdoContext {
     void *_rogue_candidates;
     HostbufFileReaderSlot _hostbuf_file_reader_slots[HOSTBUF_FILE_READER_SLOTS];
     int _hostbuf_file_reader_active;
+#if defined(__HIP_PLATFORM_AMD__) && !defined(_WIN32) && !defined(_WIN64)
+    bool _svm_backed;
+    CUstream _svm_stream;
+    CUdeviceptr _svm_staging;
+    CUevent _svm_staging_event;
+    uint64_t _svm_agent; /* hsa_agent_t handle */
+    char _svm_kfd_vram_path[64];
+    char _svm_drm_vram_path[64];
+#endif
 #if defined(__HIP_PLATFORM_AMD__) && defined(_WIN32)
     VramBuffer *_va_pool;
     void *_va_pool_lock;
@@ -91,6 +100,17 @@ bool set_devctx_for_current_cuda_device(void);
 #define size_table_lock             (g_devctx->_size_table_lock)
 #define rogues                      (g_devctx->_rogues)
 #define global_rogue_candidates     (g_devctx->_rogue_candidates)
+#if defined(__HIP_PLATFORM_AMD__) && !defined(_WIN32) && !defined(_WIN64)
+#define svm_backed                  (g_devctx->_svm_backed)
+#define svm_stream                  (g_devctx->_svm_stream)
+#define svm_staging                 (g_devctx->_svm_staging)
+#define svm_staging_event           (g_devctx->_svm_staging_event)
+#define svm_agent                   (g_devctx->_svm_agent)
+#define svm_kfd_vram_path           (g_devctx->_svm_kfd_vram_path)
+#define svm_drm_vram_path           (g_devctx->_svm_drm_vram_path)
+#else
+#define svm_backed                  false
+#endif
 #if defined(__HIP_PLATFORM_AMD__) && defined(_WIN32)
 #define va_pool                     (g_devctx->_va_pool)
 #define va_pool_lock                (g_devctx->_va_pool_lock)

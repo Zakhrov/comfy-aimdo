@@ -112,9 +112,7 @@ static inline int mod1(ModelVBAR *mv, size_t page_nr, bool do_free, bool do_unpi
                 return -1;
             }
         }
-        CHECK_CU(cuMemUnmap(vaddr, VBAR_PAGE_SIZE));
-        unmap_workaround(vaddr, VBAR_PAGE_SIZE);
-        CHECK_CU(cuMemRelease(rp->handle));
+        unmap_release(vaddr, VBAR_PAGE_SIZE, rp->handle);
         total_vram_usage -= VBAR_PAGE_SIZE;
         rp->handle = 0;
         mv->resident_count--;
@@ -265,7 +263,7 @@ void *vbar_allocate(void *devctx, uint64_t size, int device,
     size = (uint64_t)nr_pages * VBAR_PAGE_SIZE;
 
     /* FIXME: Do I care about alignment? Does Cuda just look after itself? */
-    if (!CHECK_CU(cuMemAddressReserve(&mv->vbar, size, 0, 0, 0))) {
+    if (!CHECK_CU(va_reserve(&mv->vbar, size, 0))) {
         log(AIMDO_LOG_ERROR, "Could not reseve Virtual Address space for VBAR\n");
         free(mv);
         return NULL;
@@ -511,7 +509,7 @@ void vbar_free(void *devctx, void *vbar) {
         mod1(mv, page_nr, true, true);
     }
     remove_vbar(mv);
-    CHECK_CU(cuMemAddressFree(mv->vbar, (size_t)mv->nr_pages * VBAR_PAGE_SIZE));
+    CHECK_CU(va_free(mv->vbar, (size_t)mv->nr_pages * VBAR_PAGE_SIZE));
     CHECK_CU(cuCtxSynchronize());
     free(mv);
 }

@@ -1055,6 +1055,12 @@ bool malloc_graph_free(CUdeviceptr ptr, CUstream stream, int *result) {
     return true;
 }
 
+/* Graphs alias physical pages at several addresses, which SVM backing cannot do. */
+SHARED_EXPORT bool malloc_graph_supported(void *devctx) {
+    set_devctx(devctx);
+    return !svm_backed;
+}
+
 SHARED_EXPORT void *malloc_graph_create(void *devctx, CUstream stream, bool assert_breaks) {
     MallocGraph *g = calloc(1, sizeof(*g));
 

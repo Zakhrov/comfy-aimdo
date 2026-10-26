@@ -38,6 +38,10 @@ typedef struct CUuuid_st {
 typedef enum CUdevice_attribute_enum {
 #if defined(__HIP_PLATFORM_AMD__)
     CU_DEVICE_ATTRIBUTE_INTEGRATED = 16,
+    CU_DEVICE_ATTRIBUTE_PCI_BUS_ID = 67,
+    CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID = 68,
+    CU_DEVICE_ATTRIBUTE_PCI_DOMAIN_ID = 69,
+    CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED = 89,
 #else
     CU_DEVICE_ATTRIBUTE_INTEGRATED = 18,
 #endif
@@ -48,6 +52,46 @@ typedef enum cudaError_enum {
     CUDA_ERROR_OUT_OF_MEMORY = 2,
     CUDA_ERROR_UNKNOWN = 999,
 } cudaError_enum;
+
+#define CU_DEVICE_CPU ((CUdevice)-1)
+
+typedef enum CUstream_flags_enum {
+    CU_STREAM_NON_BLOCKING = 0x1,
+} CUstream_flags;
+
+typedef enum CUmemAttach_flags_enum {
+    CU_MEM_ATTACH_GLOBAL = 0x1,
+} CUmemAttach_flags;
+
+#if defined(__HIP_PLATFORM_AMD__)
+/* HIP only: lets the device cache managed memory resident in its VRAM. */
+#define HIP_MEM_ADVISE_SET_COARSE_GRAIN 100
+
+typedef enum hipMemcpyKind_enum {
+    HIP_MEMCPY_HOST_TO_HOST = 0,
+    HIP_MEMCPY_HOST_TO_DEVICE = 1,
+    HIP_MEMCPY_DEVICE_TO_HOST = 2,
+    HIP_MEMCPY_DEVICE_TO_DEVICE = 3,
+} hipMemcpyKind;
+
+/* ROCr, for per-agent SVM access. */
+typedef int hsa_status_t;
+typedef struct hsa_agent_s {
+    uint64_t handle;
+} hsa_agent_t;
+typedef struct hsa_amd_svm_attribute_pair_s {
+    uint64_t attribute;
+    uint64_t value;
+} hsa_amd_svm_attribute_pair_t;
+
+#define HSA_STATUS_SUCCESS 0
+#define HSA_AGENT_INFO_DEVICE 17
+#define HSA_DEVICE_TYPE_GPU 1
+#define HSA_AMD_AGENT_INFO_BDFID 0xA006
+#define HSA_AMD_AGENT_INFO_DOMAIN 0xA00F
+#define HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE 0x200
+#define HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS 0x202
+#endif
 
 typedef enum CUevent_flags_enum {
     CU_EVENT_DISABLE_TIMING = 0x2,

@@ -53,6 +53,10 @@ void *vrambuf_create(int device, size_t max_size) {
     }
 
     max_size = CUDA_ALIGN_UP(max_size);
+    /* An SVM reservation is briefly populated in RAM; it can never back more than VRAM. */
+    if (svm_backed && max_size > CUDA_ALIGN_UP(vram_capacity)) {
+        max_size = CUDA_ALIGN_UP(vram_capacity);
+    }
 
 #if defined(__HIP_PLATFORM_AMD__) && defined(_WIN32)
     mutex_lock((Mutex)va_pool_lock);
@@ -75,7 +79,7 @@ void *vrambuf_create(int device, size_t max_size) {
     buf->device = device;
     buf->max_size = max_size;
 
-    if (!CHECK_CU(cuMemAddressReserve(&buf->base_ptr, max_size, 0, 0, 0))) {
+    if (!CHECK_CU(va_reserve(&buf->base_ptr, max_size, 0))) {
         log(AIMDO_LOG_ERROR, "%s: %d %zuk\n", __func__, device, max_size / K);
         free(buf);
         return NULL;
@@ -114,7 +118,8 @@ bool vrambuf_grow(void *arg, size_t required_size) {
     }
     while (buf->allocated < grow_to) {
         size_t to_allocate = grow_to - buf->allocated;
-        if (to_allocate > VRAM_CHUNK_SIZE) {
+        /* Each SVM map synchronizes, so it takes the whole growth at once. */
+        if (to_allocate > VRAM_CHUNK_SIZE && !svm_backed) {
             to_allocate = VRAM_CHUNK_SIZE;
         }
         if ((err = three_stooges(buf->base_ptr + buf->allocated, to_allocate, buf->device, &handle)) != CUDA_SUCCESS) {
@@ -123,7 +128,7 @@ bool vrambuf_grow(void *arg, size_t required_size) {
                 return false;
             }
             log(DEBUG, "Pytorch allocator attempt exceeds available VRAM ...\n");
-            if (!vbars_free(VRAM_CHUNK_SIZE)) {
+            if (!vbars_free(to_allocate)) {
                 return false;
             }
             if ((err = three_stooges(buf->base_ptr + buf->allocated, to_allocate, buf->device, &handle)) != CUDA_SUCCESS) {
@@ -159,13 +164,17 @@ bool vrambuf_destroy(void *arg) {
         return false;
     }
 
-    if (buf->allocated > 0) {
-        CHECK_CU(cuMemUnmap(buf->base_ptr, buf->allocated));
-        unmap_workaround(buf->base_ptr, buf->allocated);
-    }
+    if (svm_backed) {
+        svm_unmap(buf->base_ptr, buf->allocated);
+    } else {
+        if (buf->allocated > 0) {
+            CHECK_CU(cuMemUnmap(buf->base_ptr, buf->allocated));
+            unmap_workaround(buf->base_ptr, buf->allocated);
+        }
 
-    for (i = 0; i < buf->handle_count; i++) {
-        CHECK_CU(cuMemRelease(buf->handles[i]));
+        for (i = 0; i < buf->handle_count; i++) {
+            CHECK_CU(cuMemRelease(buf->handles[i]));
+        }
     }
 
     total_vram_usage -= buf->allocated;
@@ -180,7 +189,7 @@ bool vrambuf_destroy(void *arg) {
     mutex_unlock((Mutex)va_pool_lock);
     return true;
 #else
-    CHECK_CU(cuMemAddressFree(buf->base_ptr, buf->max_size));
+    CHECK_CU(va_free(buf->base_ptr, buf->max_size));
     free(buf);
     return true;
 #endif
