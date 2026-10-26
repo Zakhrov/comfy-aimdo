@@ -168,8 +168,7 @@ bool cuda_budget_deficit(const char **prevailing_deficit_method) {
 #if (defined(_WIN32) || defined(_WIN64)) && defined(AIMDO_CUDA)
     used_nvml = nvml_device && aimdo_nvml_memory_info(nvml_device, &free_vram, &total_vram);
 #endif
-    if (!used_nvml && !(svm_backed ? svm_mem_get_info(&free_vram, &total_vram)
-                                   : CHECK_CU(cuMemGetInfo(&free_vram, &total_vram)))) {
+    if (!used_nvml && !CHECK_CU(cuMemGetInfo(&free_vram, &total_vram))) {
         return false;
     }
     deficit_sync = (ssize_t)VRAM_HEADROOM - (ssize_t)free_vram;

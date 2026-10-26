@@ -50,6 +50,7 @@ static CUresult (CUDAAPI *true_hipMemcpyAsync)(void *, const void *, size_t, int
 static CUresult (CUDAAPI *true_hipMemcpyWithStream)(void *, const void *, size_t, int, CUstream);
 static CUresult (CUDAAPI *true_cuMemcpyHtoDAsync)(CUdeviceptr, const void *, size_t, CUstream);
 static CUresult (CUDAAPI *true_cuMemcpyDtoHAsync)(void *, CUdeviceptr, size_t, CUstream);
+static CUresult (CUDAAPI *true_cuMemGetInfo)(size_t *, size_t *);
 
 static CUresult CUDAAPI aimdo_hipMemcpyAsync(void *dst, const void *src, size_t bytes, int kind,
                                              CUstream hStream) {
@@ -65,6 +66,16 @@ static CUresult CUDAAPI aimdo_cuMemcpyHtoDAsync(CUdeviceptr dst, const void *src
                                                 CUstream hStream) {
     return svm_memcpy((void *)(uintptr_t)dst, src, bytes, HIP_MEMCPY_HOST_TO_DEVICE, hStream,
                       true_hipMemcpyAsync);
+}
+
+/* hipMemGetInfo leaves out SVM pages resident in VRAM; report what the device has. */
+static CUresult CUDAAPI aimdo_cuMemGetInfo(size_t *free_bytes, size_t *total_bytes) {
+    AimdoContext *devctx = g_devctx;
+    bool answered = set_devctx_for_current_cuda_device() && svm_backed &&
+                    svm_mem_get_info(free_bytes, total_bytes);
+
+    set_devctx(devctx);
+    return answered ? CUDA_SUCCESS : true_cuMemGetInfo(free_bytes, total_bytes);
 }
 
 static CUresult CUDAAPI aimdo_cuMemcpyDtoHAsync(void *dst, CUdeviceptr src, size_t bytes,
@@ -86,5 +97,6 @@ static const HookEntry hooks[] = {
     { (void **)&true_hipMemcpyWithStream,  (void **)&g_cuda.p_hipMemcpyWithStream,  aimdo_hipMemcpyWithStream,  "hipMemcpyWithStream" },
     { (void **)&true_cuMemcpyHtoDAsync,    (void **)&g_cuda.p_cuMemcpyHtoDAsync,    aimdo_cuMemcpyHtoDAsync,    "cuMemcpyHtoDAsync" },
     { (void **)&true_cuMemcpyDtoHAsync,    (void **)&g_cuda.p_cuMemcpyDtoHAsync,    aimdo_cuMemcpyDtoHAsync,    "cuMemcpyDtoHAsync" },
+    { (void **)&true_cuMemGetInfo,         (void **)&g_cuda.p_cuMemGetInfo,         aimdo_cuMemGetInfo,         "cuMemGetInfo" },
 #endif
 };
