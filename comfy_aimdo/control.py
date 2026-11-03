@@ -157,6 +157,17 @@ def init(implementation: str | None = None, simple_vram_headroom: int | None = N
 
     return True
 
+def disable_unusable_vmm():
+    """Keep HIP off VMM if the kernel cannot signal its mapping fence, which would hang it.
+
+    Must run before anything uses a HIP device. Does not initialize aimdo.
+    """
+    if platform.system() == "Linux" and detect_vendor() == "rocm":
+        probe = ctypes.CDLL(str(Path(__file__).parent.resolve() / "aimdo_rocm.so"), mode=258)
+        probe.disable_unusable_vmm.restype = ctypes.c_bool
+        if probe.disable_unusable_vmm():
+            logging.info("comfy-aimdo: kernel GEM_VA fence does not signal, disabling HIP virtual memory")
+
 def init_devices(device_ids):
     global devctxs
 

@@ -2,11 +2,15 @@
 
 #include <dlfcn.h>
 #include <pthread.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 
 /* ROCr only offers hipMemAddressReserve/hipMemMap when the KFD can manage compute
- * VM mappings through GEM_VA (KFD 1.15). On older kernels (e.g. SLES 6.4, KFD 1.14)
+ * VM mappings through GEM_VA (KFD 1.15). On older kernels (e.g. SLES 6.4, KFD 1.14),
+ * and on kernels where the VM fence never signals (see gem_va_fence_signals),
  * HIP managed memory gives the same fixed-address, partially resident range:
  * prefetching a range to the GPU backs it with VRAM, prefetching it back to the CPU
  * and discarding the host pages releases it.
@@ -176,6 +180,127 @@ static bool svm_create_device_objects(CUdevice dev) {
     }
     CHECK_CU(g_cuda.p_hipSetDevice(current));
     return ok;
+}
+
+/* Layouts from amdgpu_drm.h and drm.h, kept here as the extended GEM_VA is newer than
+ * the system headers of most build hosts.
+ */
+struct gem_create_args {
+    union {
+        struct {
+            uint64_t bo_size, alignment, domains, domain_flags;
+        } in;
+        struct {
+            uint32_t handle, pad;
+        } out;
+    };
+};
+
+struct gem_va_args {
+    uint32_t handle, pad, operation, flags;
+    uint64_t va_address, offset_in_bo, map_size, vm_timeline_point;
+    uint32_t vm_timeline_syncobj_out, num_syncobj_handles;
+    uint64_t input_fence_syncobj_handles;
+};
+
+struct syncobj_create_args {
+    uint32_t handle, flags;
+};
+
+struct syncobj_timeline_wait_args {
+    uint64_t handles, points;
+    int64_t timeout_nsec;
+    uint32_t count_handles, flags, first_signaled, pad;
+};
+
+#define DRM_IOCTL_AMDGPU_GEM_CREATE _IOWR('d', 0x40, struct gem_create_args)
+#define DRM_IOCTL_AMDGPU_GEM_VA _IOW('d', 0x48, struct gem_va_args)
+#define DRM_IOCTL_SYNCOBJ_CREATE _IOWR('d', 0xBF, struct syncobj_create_args)
+#define DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT _IOWR('d', 0xCA, struct syncobj_timeline_wait_args)
+
+#define AMDGPU_GEM_DOMAIN_GTT 2
+#define AMDGPU_VA_OP_MAP 1
+#define AMDGPU_VM_PAGE_READ_WRITE 6
+#define SYNCOBJ_WAIT_FOR_SUBMIT 2
+#define GEM_VA_PROBE_ADDRESS (4ULL * 1024 * M)
+#define GEM_VA_PROBE_TIMEOUT_NS 500000000LL
+
+/* ROCr's VMM maps through GEM_VA and then waits, with no timeout, on the VM fence it
+ * asked for in vm_timeline_syncobj_out. Some kernels report KFD 1.15+ and accept the
+ * ioctl without ever signalling that fence (Leap 16 6.12, KFD 1.17), and HIP still
+ * reports VMM support. Run the same sequence on a private fd, where the wait is bounded.
+ */
+static bool gem_va_fence_signals(int render_minor) {
+    char path[64];
+    struct timespec now;
+    struct gem_create_args bo = {.in = {.bo_size = 4096, .alignment = 4096,
+                                        .domains = AMDGPU_GEM_DOMAIN_GTT}};
+    struct syncobj_create_args syncobj = {0};
+    uint64_t point = 1;
+    bool signalled = false;
+    int fd;
+
+    snprintf(path, sizeof(path), "/dev/dri/renderD%d", render_minor);
+    if ((fd = open(path, O_RDWR | O_CLOEXEC)) < 0) {
+        return true;
+    }
+    if (!ioctl(fd, DRM_IOCTL_AMDGPU_GEM_CREATE, &bo) &&
+        !ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &syncobj) &&
+        !clock_gettime(CLOCK_MONOTONIC, &now)) {
+        struct gem_va_args va = {
+            .handle = bo.out.handle,
+            .operation = AMDGPU_VA_OP_MAP,
+            .flags = AMDGPU_VM_PAGE_READ_WRITE,
+            .va_address = GEM_VA_PROBE_ADDRESS,
+            .map_size = 4096,
+            .vm_timeline_point = point,
+            .vm_timeline_syncobj_out = syncobj.handle,
+        };
+        uint32_t handle = syncobj.handle;
+        struct syncobj_timeline_wait_args wait = {
+            .handles = (uintptr_t)&handle,
+            .points = (uintptr_t)&point,
+            .timeout_nsec = now.tv_sec * 1000000000LL + now.tv_nsec + GEM_VA_PROBE_TIMEOUT_NS,
+            .count_handles = 1,
+            .flags = SYNCOBJ_WAIT_FOR_SUBMIT,
+        };
+
+        signalled = !ioctl(fd, DRM_IOCTL_AMDGPU_GEM_VA, &va) &&
+                    !ioctl(fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
+    }
+    /* Closing the fd drops its VM, BO and syncobj. */
+    close(fd);
+    return signalled;
+}
+
+/* HIP's memory pools (hipMallocAsync) map through VMM as well, so moving the VBARs to SVM
+ * is not enough: HIP itself must not use VMM. It reads this flag when first used, so this
+ * has to run before anything touches a device. Returns true if VMM was disabled.
+ */
+SHARED_EXPORT bool disable_unusable_vmm(void) {
+    char path[128], key[64];
+    unsigned long long value;
+
+    for (int node = 0;; node++) {
+        int render_minor = 0;
+        FILE *f;
+
+        snprintf(path, sizeof(path), KFD_TOPOLOGY "/%d/properties", node);
+        if (!(f = fopen(path, "r"))) {
+            return false;
+        }
+        while (fscanf(f, "%63s %llu", key, &value) == 2) {
+            if (!strcmp(key, "drm_render_minor")) {
+                render_minor = (int)value;
+            }
+        }
+        fclose(f);
+
+        if (render_minor && !gem_va_fence_signals(render_minor)) {
+            setenv("HIP_VMEM_MANAGE_SUPPORT", "0", 0);
+            return true;
+        }
+    }
 }
 
 bool svm_init(CUdevice dev) {
